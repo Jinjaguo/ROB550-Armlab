@@ -95,6 +95,14 @@ class Gui(QMainWindow):
         self.ui.btnUser3.clicked.connect(lambda: self.rxarm.gripper.grasp())
         self.ui.btnUser4.setText('Execute')
         self.ui.btnUser4.clicked.connect(partial(nxt_if_arm_init, 'execute'))
+        self.ui.btnUser5.setText('Record Mode')
+        self.ui.btnUser5.clicked.connect(partial(lambda:self.sm.record()))
+        self.ui.btnUser6.setText('Record position')
+        self.ui.btnUser6.clicked.connect(partial(lambda:self.sm.record_waypoint()))
+        self.ui.btnUser7.setText('Change gripper state')
+        self.ui.btnUser7.clicked.connect(partial(lambda:self.sm.change_gripper_state()))
+        self.ui.btnUser8.setText('Go to Waypoint')
+        self.ui.btnUser8.clicked.connect(partial(lambda:self.sm.goto_waypoint()))
 
         # Sliders
         for sldr in self.joint_sliders:

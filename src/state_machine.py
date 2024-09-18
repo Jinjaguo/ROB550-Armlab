@@ -26,6 +26,10 @@ class StateMachine():
         self.status_message = "State: Idle"
         self.current_state = "idle"
         self.next_state = "idle"
+        self.teaching_waypoints = np.empty((0,8)) 
+        self.gripper_state = 0 # 0 = open, 1 = closed
+        self.moving_time = 0
+        self.accel_time = 0
         self.waypoints = [
             [-np.pi/2,       -0.5,      -0.3,          0.0,        0.0],
             [0.75*-np.pi/2,   0.5,       0.3,     -np.pi/3,    np.pi/2],
@@ -77,6 +81,9 @@ class StateMachine():
         if self.next_state == "manual":
             self.manual()
 
+        if self.next_state == "goto_waypoint":
+            self.goto_waypoint()
+
 
     """Functions run for each state"""
 
@@ -109,7 +116,90 @@ class StateMachine():
               Make sure you respect estop signal
         """
         self.status_message = "State: Execute - Executing motion plan"
+        self.current_state = "execute"
+
+        moving_time = self.rxarm.set_moving_time(3)
+        accel_time = self.rxarm.set_accel_time(5)
+        for wp in self.waypoints:
+            if self.next_state == "estop":
+                self.status_message = "State: Execute - Estop signal detected, stopping motion"
+                return
+            self.rxarm.arm.set_joint_positions(wp,
+                                                moving_time=moving_time,
+                                                accel_time=accel_time,
+                                                blocking=True
+            )
+        self.rxarm.sleep()
         self.next_state = "idle"
+
+    def record(self):
+        self.teaching_waypoints = np.empty((0,8))
+        self.rxarm.arm.go_to_sleep_pose(moving_time=2,
+                              accel_time=1,
+                              blocking=True)
+        self.gripper_state = 0
+        self.rxarm.gripper.release()
+        time.sleep(1)
+        self.rxarm.disable_torque()
+        print('Start recording waypoints')
+    
+
+    def record_waypoint(self):
+        current_position = self.rxarm.get_positions()
+        if len(self.teaching_waypoints) > 0:
+            last_position = self.teaching_waypoints[-1][:5]
+            angular_displacements = np.abs(current_position - last_position)
+            max_angular_displacement = np.max(angular_displacements)
+            self.move_time = np.clip(max_angular_displacement / (np.pi/6), 2, 6)
+            self.accel_time = np.clip(self.move_time / 2, 1, 3)
+        else:
+            self.move_time = 2 
+            self.accel_time = 0.5  
+        current_position_with_state = np.append(current_position, [self.gripper_state, self.move_time, self.accel_time])
+        print('******************************************************')
+        print('current position with state',current_position_with_state)
+        self.teaching_waypoints = np.vstack((self.teaching_waypoints, current_position_with_state))
+        self.status_message = "State: Record - Recorded waypoint"
+        print('======================================================')
+        print('teaching waypoints', self.teaching_waypoints)
+
+    def change_gripper_state(self):
+        self.gripper_state = 1 - self.gripper_state
+        print('---------------------------------------------------')
+        print('the state of the gripper is now', self.gripper_state)
+        
+    def goto_waypoint(self):   
+        self.current_state = "goto_waypoint"
+        self.status_message = "State: Go to waypoint - Moving to waypoint"
+        self.rxarm.enable_torque()
+        self.rxarm.arm.go_to_sleep_pose(moving_time=2,
+                              accel_time=1,
+                              blocking=True)
+        moving_time = self.rxarm.set_moving_time(3)
+        accel_time = self.rxarm.set_accel_time(5)
+        for wp in self.teaching_waypoints:
+            joint_positions = wp[:5]  
+            gripper_state = wp[5]     
+            moving_time = wp[6]         
+            accel_time = wp[7]        
+            self.rxarm.arm.set_joint_positions(joint_positions,
+                                                moving_time=moving_time,
+                                                accel_time=accel_time,
+                                                blocking=True)
+            time.sleep(0.2)
+            if gripper_state == 0:
+                self.rxarm.gripper.release()
+            else:
+                self.rxarm.gripper.grasp()
+            time.sleep(0.2)
+        self.rxarm.arm.go_to_sleep_pose(moving_time=2,
+                              accel_time=1,
+                              blocking=True)
+        print('===============================================================')
+        print('Finished moving to all waypoints')
+        self.next_state = "idle"
+        
+
 
     def calibrate(self):
         """!
