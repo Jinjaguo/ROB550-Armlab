@@ -28,8 +28,8 @@ class StateMachine():
         self.next_state = "idle"
         self.teaching_waypoints = np.empty((0,8)) 
         self.gripper_state = 0 # 0 = open, 1 = closed
-        self.moving_time = 0
-        self.accel_time = 0
+        self.moving_time = 2
+        self.accel_time = 0.5
         self.waypoints = [
             [-np.pi/2,       -0.5,      -0.3,          0.0,        0.0],
             [0.75*-np.pi/2,   0.5,       0.3,     -np.pi/3,    np.pi/2],
@@ -150,8 +150,8 @@ class StateMachine():
             last_position = self.teaching_waypoints[-1][:5]
             angular_displacements = np.abs(current_position - last_position)
             max_angular_displacement = np.max(angular_displacements)
-            self.move_time = np.clip(max_angular_displacement / (np.pi/6), 2, 6)
-            self.accel_time = np.clip(self.move_time / 2, 1, 3)
+            self.move_time = np.clip(max_angular_displacement / (np.pi/6), 1, 2)
+            self.accel_time = np.clip(self.move_time / 2, 0.1, 0.5)
         else:
             self.move_time = 2 
             self.accel_time = 0.5  
@@ -186,7 +186,7 @@ class StateMachine():
                                                 moving_time=moving_time,
                                                 accel_time=accel_time,
                                                 blocking=True)
-            time.sleep(0.2)
+            time.sleep(0.05)
             if gripper_state == 0:
                 self.rxarm.gripper.release()
             else:
