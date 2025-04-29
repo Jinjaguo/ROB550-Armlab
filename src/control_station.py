@@ -86,6 +86,12 @@ class Gui(QMainWindow):
         self.ui.btn_torq_on.clicked.connect(lambda: self.rxarm.enable_torque())
         self.ui.btn_sleep_arm.clicked.connect(lambda: self.rxarm.sleep())
 
+
+        # Tasks
+        self.ui.btn_task1.clicked.connect(partial(nxt_if_arm_init, 'event_1'))
+        self.ui.btn_task2.clicked.connect(partial(nxt_if_arm_init, 'event_2'))
+        self.ui.btn_task3.clicked.connect(partial(nxt_if_arm_init, 'event_3'))
+
         #User Buttons
         self.ui.btnUser1.setText("Calibrate")
         self.ui.btnUser1.clicked.connect(partial(nxt_if_arm_init, 'calibrate'))
@@ -93,16 +99,18 @@ class Gui(QMainWindow):
         self.ui.btnUser2.clicked.connect(lambda: self.rxarm.gripper.release())
         self.ui.btnUser3.setText('Close Gripper')
         self.ui.btnUser3.clicked.connect(lambda: self.rxarm.gripper.grasp())
-        self.ui.btnUser4.setText('Execute')
-        self.ui.btnUser4.clicked.connect(partial(nxt_if_arm_init, 'execute'))
-        self.ui.btnUser5.setText('Record Mode')
-        self.ui.btnUser5.clicked.connect(partial(lambda:self.sm.record()))
-        self.ui.btnUser6.setText('Record position')
-        self.ui.btnUser6.clicked.connect(partial(lambda:self.sm.record_waypoint()))
-        self.ui.btnUser7.setText('Change gripper state')
-        self.ui.btnUser7.clicked.connect(partial(lambda:self.sm.change_gripper_state()))
-        self.ui.btnUser8.setText('Go to Waypoint')
-        self.ui.btnUser8.clicked.connect(partial(lambda:self.sm.goto_waypoint()))
+        self.ui.btnUser4.setText('Execute Premade Path')
+        self.ui.btnUser4.clicked.connect(partial(nxt_if_arm_init, 'execute_static'))
+        self.ui.btnUser5.setText('Start Teaching')
+        self.ui.btnUser5.clicked.connect(lambda: self.rxarm.clear_saved_positions())
+        self.ui.btnUser6.setText('Save Position w/ Gripper Open')
+        self.ui.btnUser6.clicked.connect(lambda: self.rxarm.save_position(0))
+        self.ui.btnUser7.setText('Save Position w/ Gripper Closed')
+        self.ui.btnUser7.clicked.connect(lambda: self.rxarm.save_position(1))
+        self.ui.btnUser8.setText('Execute Learned Path')
+        self.ui.btnUser8.clicked.connect(partial(nxt_if_arm_init, 'execute_learned'))
+        self.ui.btnUser9.setText('Detect Blocks')
+        self.ui.btnUser9.clicked.connect(partial(nxt_if_arm_init, 'detect'))
 
         # Sliders
         for sldr in self.joint_sliders:
@@ -130,6 +138,8 @@ class Gui(QMainWindow):
         self.ArmThread.updateEndEffectorReadout.connect(
             self.updateEndEffectorReadout)
         self.ArmThread.start()
+        # Initialize End-effector position
+        self.ef_pos = [0, 0, 0, 0, 0, 0]
 
     """ Slots attach callback functions to signals emitted from threads"""
 
@@ -146,6 +156,8 @@ class Gui(QMainWindow):
     ### Distances should be in mm
     @pyqtSlot(list)
     def updateEndEffectorReadout(self, pos):
+        self.ef_pos = pos
+        self.camera.ef_pos = pos[:3]
         self.ui.rdoutX.setText(str("%+.2f mm" % (pos[0])))
         self.ui.rdoutY.setText(str("%+.2f mm" % (pos[1])))
         self.ui.rdoutZ.setText(str("%+.2f mm" % (pos[2])))
@@ -226,14 +238,22 @@ class Gui(QMainWindow):
 
         @param      mouse_event  QtMouseEvent containing the pose of the mouse at the time of the event not current time
         """
+        try:
+            pt = mouse_event.pos()
+            if self.camera.DepthFrameRaw.any() != 0:
+                pt = np.array([pt.x(), pt.y(), 1])
+                inv_h_pt = self.camera.inverse_homography(pt[:2]).astype(np.int32)
+            
+                z = self.camera.DepthFrameRawNoHomography[inv_h_pt[1]][inv_h_pt[0]]
 
-        pt = mouse_event.pos()
-        if self.camera.DepthFrameRaw.any() != 0:
-            z = self.camera.DepthFrameRaw[pt.y()][pt.x()]
-            self.ui.rdoutMousePixels.setText("(%.0f,%.0f,%.0f)" %
-                                             (pt.x(), pt.y(), z))
-            self.ui.rdoutMouseWorld.setText("(-,-,-)")
-
+                self.ui.rdoutMousePixels.setText("(%.0f,%.0f,%.0f)" %
+                                                (pt[0], pt[1], z))
+                world_frame = self.camera.pixel2World(inv_h_pt[0], inv_h_pt[1], z)
+                self.camera.click_point_world = world_frame
+                self.ui.rdoutMouseWorld.setText("(%.0f,%.0f,%.0f)" %
+                                                (world_frame[0], world_frame[1], world_frame[2]))
+        except:
+            pass
     def calibrateMousePress(self, mouse_event):
         """!
         @brief Record mouse click positions for calibration
@@ -245,6 +265,8 @@ class Gui(QMainWindow):
         self.camera.last_click[0] = pt.x()
         self.camera.last_click[1] = pt.y()
         self.camera.new_click = True
+        self.sm.next_state = "click_block"
+        self.sm.click_point = self.camera.click_point_world
         # print(self.camera.last_click)
 
     def initRxarm(self):
